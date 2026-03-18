@@ -17,6 +17,7 @@ from config import (
     MOSQUITO_MIN_AREA, MOSQUITO_MAX_AREA, MOSQUITO_MIN_CIRCULARITY,
     MIN_VELOCITY, MAX_VELOCITY,
     MAX_TRACK_DISTANCE, MAX_LOST_FRAMES, MIN_CONFIRM_FRAMES,
+    MAX_TARGETS,
 )
 
 
@@ -213,6 +214,12 @@ class MosquitoDetector:
 
         # Prune dead tracks
         self.tracks = [t for t in self.tracks if t.lost < MAX_LOST_FRAMES]
+
+        # Enforce max targets limit: keep the best ones, drop the rest
+        if MAX_TARGETS > 0 and len(self.tracks) > MAX_TARGETS:
+            # Priority: confirmed first, then most hits, then most recent
+            self.tracks.sort(key=lambda t: (-t.confirmed, -t.hits, -t.last_seen))
+            self.tracks = self.tracks[:MAX_TARGETS]
 
         self.stats["active_tracks"] = len(self.tracks)
         self.stats["confirmed_tracks"] = sum(1 for t in self.tracks if t.confirmed)

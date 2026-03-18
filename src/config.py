@@ -31,6 +31,7 @@ MAX_VELOCITY = 80.0            # max movement -- reject large jumps (noise)
 MAX_TRACK_DISTANCE = 60        # max px distance to associate detections
 MAX_LOST_FRAMES = 15           # frames before dropping a lost track
 MIN_CONFIRM_FRAMES = 3         # consecutive detections to confirm target
+MAX_TARGETS = 1                # max simultaneous tracked targets (0=unlimited)
 
 # ── Aiming ──────────────────────────────────────────────
 AIM_MODE = "servo"             # "servo" | "galvo" | "none"
