@@ -42,7 +42,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Mosquito Laser Tracker")
     p.add_argument("--aim", choices=["servo", "galvo", "none"],
                     default=None, help="Aiming mode (overrides config)")
-    p.add_argument("--camera", choices=["picamera", "usb", "file"],
+    p.add_argument("--camera", choices=["picamera", "usb", "raw_bayer", "file"],
                     default=None, help="Camera type (overrides config)")
     p.add_argument("--video", default=None, help="Video file path (for --camera file)")
     p.add_argument("--port", type=int, default=None, help="Web dashboard port")
