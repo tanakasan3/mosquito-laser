@@ -34,10 +34,14 @@ class Camera:
         if self._running:
             return
 
+        self._raw_bayer_mode = False
         if CAMERA_TYPE == "picamera":
             self._start_picamera()
         elif CAMERA_TYPE == "usb":
             self._start_usb()
+        elif CAMERA_TYPE == "raw_bayer":
+            self._start_raw_bayer()
+            self._raw_bayer_mode = True
         elif CAMERA_TYPE == "file":
             self._start_file()
         else:
@@ -72,6 +76,30 @@ class Camera:
         if not self._cap.isOpened():
             raise RuntimeError(f"Cannot open USB camera index {CAMERA_INDEX}")
 
+    def _start_raw_bayer(self):
+        """
+        Start CSI camera via raw Bayer capture on Pi (Ubuntu workaround).
+        Uses v4l2 to grab 10-bit packed Bayer and debayers in software.
+        Needed when libcamera IPA is broken (Ubuntu 24.04 on Pi).
+        """
+        import subprocess
+        # Set sensor exposure and gain
+        subprocess.run(["v4l2-ctl", "-d", "/dev/v4l-subdev0",
+                        "-c", "exposure=1600,analogue_gain=120"],
+                       capture_output=True)
+        # Set raw Bayer format on unicam
+        subprocess.run(["v4l2-ctl", "-d", f"/dev/video{CAMERA_INDEX}",
+                        f"--set-fmt-video=width={CAMERA_WIDTH},height={CAMERA_HEIGHT},pixelformat=pBAA"],
+                       capture_output=True)
+        self._cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
+        fourcc = cv2.VideoWriter_fourcc(*'pBAA')
+        self._cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+        self._cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+        if not self._cap.isOpened():
+            raise RuntimeError("Cannot open raw Bayer camera")
+
     def _start_file(self):
         """Open a video file for testing."""
         if not VIDEO_FILE:
@@ -89,15 +117,20 @@ class Camera:
                 if frame is not None:
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             elif self._cap is not None:
-                ret, frame = self._cap.read()
+                ret, raw = self._cap.read()
                 if not ret:
                     if CAMERA_TYPE == "file":
-                        # Loop video file
                         self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         continue
                     else:
                         time.sleep(0.01)
                         continue
+
+                if getattr(self, '_raw_bayer_mode', False):
+                    # Unpack 10-bit MIPI packed Bayer to 8-bit BGR
+                    frame = self._debayer_mipi10(raw)
+                else:
+                    frame = raw
 
             if frame is not None:
                 with self._lock:
@@ -122,6 +155,48 @@ class Camera:
         if self._picam:
             self._picam.stop()
         print("[camera] stopped")
+
+    def _debayer_mipi10(self, raw: np.ndarray) -> Optional[np.ndarray]:
+        """Unpack 10-bit MIPI packed Bayer to 8-bit BGR."""
+        try:
+            data = raw.flatten()
+            rows, cols = CAMERA_HEIGHT, CAMERA_WIDTH
+            expected = rows * cols * 10 // 8
+            if len(data) < expected:
+                return None
+
+            # Unpack: every 5 bytes = 4 pixels (10-bit packed)
+            d = data[:expected]
+            b0 = d[0::5].astype(np.uint16)
+            b1 = d[1::5].astype(np.uint16)
+            b2 = d[2::5].astype(np.uint16)
+            b3 = d[3::5].astype(np.uint16)
+            b4 = d[4::5].astype(np.uint16)
+
+            p0 = (b0 << 2) | ((b4 >> 0) & 0x03)
+            p1 = (b1 << 2) | ((b4 >> 2) & 0x03)
+            p2 = (b2 << 2) | ((b4 >> 4) & 0x03)
+            p3 = (b3 << 2) | ((b4 >> 6) & 0x03)
+
+            pixels = np.empty(len(p0) * 4, dtype=np.uint16)
+            pixels[0::4] = p0
+            pixels[1::4] = p1
+            pixels[2::4] = p2
+            pixels[3::4] = p3
+
+            bayer = (pixels[:rows * cols] >> 2).astype(np.uint8).reshape(rows, cols)
+
+            # Debayer and normalize for visibility
+            bgr = cv2.cvtColor(bayer, cv2.COLOR_BayerBG2BGR)
+
+            # Auto-normalize: stretch contrast so image is visible
+            mn, mx = bgr.min(), bgr.max()
+            if mx > mn:
+                bgr = ((bgr.astype(np.float32) - mn) / (mx - mn) * 255).astype(np.uint8)
+
+            return bgr
+        except Exception as e:
+            return None
 
     @property
     def resolution(self) -> Tuple[int, int]:

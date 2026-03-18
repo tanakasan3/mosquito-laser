@@ -5,7 +5,7 @@ Edit these values to match your hardware setup.
 """
 
 # ── Camera ──────────────────────────────────────────────
-CAMERA_TYPE = "picamera"       # "picamera" | "usb" | "file"
+CAMERA_TYPE = "usb"       # "picamera" | "usb" | "raw_bayer" | "file"
 CAMERA_INDEX = 0               # USB camera index (ignored for picamera)
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
