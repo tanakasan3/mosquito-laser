@@ -1,0 +1,376 @@
+================================================================================
+   MOSQUITO LASER TRACKER - SERVO VERSION - COMPLETE WIRING DIAGRAM
+================================================================================
+
+  Author:  Mosquito Laser Project
+  Rev:     1.0
+  Notes:   All GPIO references use BCM numbering
+           Power rails: 5V from RPi or external 5V 3A PSU
+           Logic level: 3.3V (RPi GPIO)
+
+================================================================================
+  SYSTEM BLOCK DIAGRAM
+================================================================================
+
+  +-------------+     CSI Ribbon     +----------------+
+  |  Raspberry  |<==================>|   Pi Camera    |
+  |   Pi 4B     |                    |   V2 (NoIR)    |
+  |             |                    +----------------+
+  |  GPIO12 ----+----- PWM -------> Pan Servo (SG90)
+  |  GPIO13 ----+----- PWM -------> Tilt Servo (SG90)
+  |  GPIO18 ----+----- MOSFET ----> 5mW Laser Module
+  |  GPIO24 ----+----- 555 Timer -> IR LED Array
+  |  SPI0/I2C --+----- (reserved for future sensors)
+  +-------------+
+
+================================================================================
+  RASPBERRY PI 4 - GPIO HEADER (40-PIN) - RELEVANT PINS
+================================================================================
+
+                        +-----+-----+
+                        | 3V3 | 5V  |  Pin 1,2
+                        +-----+-----+
+                        | GP2 | 5V  |  Pin 3,4
+                        +-----+-----+
+                        | GP3 | GND |  Pin 5,6
+                        +-----+-----+
+                        | GP4 | GP14|  Pin 7,8
+                        +-----+-----+
+                        | GND | GP15|  Pin 9,10
+                        +-----+-----+
+                        | GP17| GP18|  Pin 11,12  <-- GP18: LASER MOSFET
+                        +-----+-----+
+                        | GP27| GND |  Pin 13,14
+                        +-----+-----+
+                        | GP22| GP23|  Pin 15,16
+                        +-----+-----+
+                        | 3V3 | GP24|  Pin 17,18  <-- GP24: 555 TIMER RESET
+                        +-----+-----+
+                        | GP10| GND |  Pin 19,20
+                        +-----+-----+
+                        | GP9 | GP25|  Pin 21,22
+                        +-----+-----+
+                        | GP11| GP8 |  Pin 23,24
+                        +-----+-----+
+                        | GND | GP7 |  Pin 25,26
+                        +-----+-----+
+                        | GP0 | GP1 |  Pin 27,28
+                        +-----+-----+
+                        | GP5 | GND |  Pin 29,30
+                        +-----+-----+
+                        | GP6 | GP12|  Pin 31,32  <-- GP12: PAN SERVO PWM
+                        +-----+-----+
+                        | GP13| GND |  Pin 33,34  <-- GP13: TILT SERVO PWM
+                        +-----+-----+
+                        | GP19| GP16|  Pin 35,36
+                        +-----+-----+
+                        | GP26| GP20|  Pin 37,38
+                        +-----+-----+
+                        | GND | GP21|  Pin 39,40
+                        +-----+-----+
+
+================================================================================
+  1. PI CAMERA V2 (NoIR) CONNECTION
+================================================================================
+
+    Raspberry Pi 4                    Pi Camera V2 (NoIR recommended)
+    +------------+                    +-------------------+
+    |            |   15-pin CSI       |                   |
+    |  CSI Port  |====================|  Ribbon Connector |
+    |  (between  |  (flat ribbon      |                   |
+    |  HDMI &    |   cable, contacts  +-------------------+
+    |  audio)    |   facing HDMI port
+    +------------+   on Pi side)
+
+    Notes: - Use NoIR (No IR filter) camera for IR illumination sensitivity
+           - Enable camera in raspi-config: Interface Options > Camera
+
+================================================================================
+  2. PAN/TILT SERVO MOTORS (SG90 or MG90S)
+================================================================================
+
+    External 5V PSU recommended for servos (avoid brownouts on Pi)
+
+                     +5V External PSU
+                         |
+                    +----+----+
+                    |         |
+              PAN SERVO    TILT SERVO
+              (SG90)       (SG90)
+
+    RPi Pin 32 (GPIO12) ----[1K]----> Pan Servo  SIGNAL (Orange/White)
+
+    RPi Pin 33 (GPIO13) ----[1K]----> Tilt Servo SIGNAL (Orange/White)
+
+                                   (1K resistors optional, for protection)
+
+    Detailed Servo Wiring:
+
+    PAN SERVO (SG90):
+    +------------------------------------------+
+    |  Wire Color  |  Function  |  Connect To  |
+    +------------------------------------------+
+    |  Brown/Black |  GND       |  PSU GND &   |
+    |              |            |  RPi GND(6)  |
+    |  Red         |  VCC (+5V) |  PSU +5V     |
+    |  Orange/Wht  |  Signal    |  GPIO12 (32) |
+    +------------------------------------------+
+
+    TILT SERVO (SG90):
+    +------------------------------------------+
+    |  Wire Color  |  Function  |  Connect To  |
+    +------------------------------------------+
+    |  Brown/Black |  GND       |  PSU GND &   |
+    |              |            |  RPi GND(34) |
+    |  Red         |  VCC (+5V) |  PSU +5V     |
+    |  Orange/Wht  |  Signal    |  GPIO13 (33) |
+    +------------------------------------------+
+
+    IMPORTANT: Connect PSU GND to RPi GND (common ground)!
+
+    Schematic:
+
+    RPi GPIO12 (Pin 32)                          PAN SERVO
+    ------[1KR]----------+---------------------- Signal (Orange)
+                          |
+                          |   Ext. 5V PSU
+                          |   +-----+
+                          |   | +5V |----------- VCC (Red)
+                          |   | GND |--+-------- GND (Brown)
+                          |   +-----+  |
+                          |             |
+    RPi GND (Pin 6) -----+-------------+------- Common GND
+
+    (Repeat identically for TILT SERVO on GPIO13 / Pin 33)
+
+================================================================================
+  3. LASER MODULE (5mW 650nm Red) via N-Channel MOSFET
+================================================================================
+
+    NEVER drive laser directly from GPIO! Use a MOSFET switch.
+
+    Components:
+      - IRLZ44N or 2N7000 N-Channel MOSFET (logic-level, Vgs < 3.3V)
+      - 10K pull-down resistor (Gate to GND)
+      - 1K gate resistor (GPIO to Gate)
+      - 5mW 650nm laser diode module (with built-in driver/resistor)
+      - Flyback diode 1N4148 (optional, across laser)
+
+                            +5V (from PSU)
+                             |
+                      +------+------+
+                      |  5mW LASER  |
+                      |  MODULE     |
+                      |  (650nm)    |
+                      |  +    -     |
+                      +--+----+-----+
+                         |    |
+                         |    | (Laser GND = MOSFET Drain)
+                         |    |
+                         |    +------ DRAIN (D)
+                         |            |
+                         |       +----+----+
+                         |       | IRLZ44N |
+                         |       | N-MOSFET|
+                         |       +----+----+
+                         |       GATE |    SOURCE (S)
+                         |         |  |      |
+                         |     [1K]+  |      |
+                         |         |  |      |
+    RPi GPIO18 (Pin 12)--+--------+  |      |
+                                      |      |
+                               [10K] +      |
+                                      |      |
+    RPi GND (Pin 14) ----------------+------+------ GND
+
+
+    Detailed MOSFET Pinout (IRLZ44N, TO-220, front view):
+
+         +----------+
+         |  IRLZ44N |
+         | N-Ch MOS |
+         +--+--+--+-+
+            |  |  |
+            G  D  S
+            |  |  |
+            |  |  +-----> GND (Source)
+            |  +--------> Laser (-) terminal (Drain)
+            +-----------> GPIO18 via 1K (Gate)
+
+    FULL CIRCUIT:
+
+         +5V PSU ----+
+                      |
+               [Laser Module +]
+               [Laser Module -]
+                      |
+                      D
+                 +---------+
+    GPIO18--[1K]-+--G      |
+                 |  IRLZ44N|
+                 +----S----+
+                 |    |
+              [10K]   |
+                 |    |
+    GND ---------+----+
+
+================================================================================
+  4. IR LED ILLUMINATION - 555 TIMER + MOSFET DRIVER
+================================================================================
+
+    Purpose: Pulse IR LEDs at adjustable frequency (1-50 kHz) for
+             synchronization with camera shutter (rolling shutter trick)
+
+    Components:
+      - NE555 Timer IC
+      - IRLZ44N N-Channel MOSFET (LED driver)
+      - IR LEDs (850nm) x8 in parallel pairs (4 series pairs)
+      - Resistors: R1=1K, R2=10K pot, C1=10nF (for ~7-72kHz range)
+      - 100nF bypass cap on 555 VCC
+      - 10R current-limiting resistors per LED pair
+      - RPi GPIO24 controls 555 RESET (enable/disable)
+
+    555 TIMER PINOUT (DIP-8, top view):
+
+            +----U----+
+     GND  1 |         | 8  VCC (+5V)
+    TRIG  2 |  NE555  | 7  DISCH
+     OUT  3 |         | 6  THRESH
+    ~RST  4 |         | 5  CTRL
+            +---------+
+
+    FULL IR ILLUMINATION CIRCUIT:
+
+                                    +5V
+                                     |
+                          +----------+----------+
+                          |          |          |
+                        [100nF]      |        [R1=1K]
+                          |          |          |
+                          |     +----+----+     |
+                          |     |8  VCC   |     |
+                          |     |         7|----+
+                          |     |  NE555  |     |
+    RPi GPIO24 (Pin 18)--+-----|4 ~RESET |   [R2=10K POT]
+                          |     |         |     |
+                          |     |3  OUT   6|----+----+
+                          |     |         |     |    |
+                          |     |2  TRIG  5|  [100nF]|
+                          |     +----+----+     |    |
+                          |          |1         |    |
+                          |          |          |    |
+                          +----------+----------+    |
+                          |                          |
+                         GND                         |
+                                                     |
+                                    +--- THRESH/TRIG -+
+                                    |
+                                  [C1=10nF]
+                                    |
+                                   GND
+
+    555 Astable Configuration:
+      - Pin 2 (TRIG) tied to Pin 6 (THRESH) via timing cap
+      - Frequency = 1.44 / ((R1 + 2*R2) * C1)
+      - With R2 as 10K pot: freq range ~7kHz to ~72kHz
+      - Pin 4 (RESET) controlled by GPIO24 (HIGH=run, LOW=stop)
+      - Pin 5 (CTRL) bypassed to GND via 100nF
+
+    555 OUTPUT (Pin 3) to MOSFET LED DRIVER:
+
+    555 Pin 3 (OUT) ----[100R]---+
+                                  |
+                                 GATE
+                            +---------+
+                            | IRLZ44N |
+                            | N-MOSFET|
+                            +----+----+
+                           D     |     S
+                           |   [10K]   |
+                           |     |     |
+                           |    GND   GND
+                           |
+              +5V          |
+               |           |
+          +----+----+------+----+------+----+------+----+
+          |         |           |           |           |
+        [10R]     [10R]      [10R]       [10R]         |
+          |         |           |           |           |
+        [LED1]    [LED3]      [LED5]      [LED7]       |
+        (850nm)   (850nm)    (850nm)     (850nm)       |
+          |         |           |           |           |
+        [LED2]    [LED4]      [LED6]      [LED8]       |
+        (850nm)   (850nm)    (850nm)     (850nm)       |
+          |         |           |           |           |
+          +----+----+------+----+------+----+-----------+
+               |
+              DRAIN (MOSFET)
+
+    LED Configuration: 4 parallel branches, each with:
+      - 10R resistor + 2 IR LEDs in series
+      - Vf per LED ~ 1.2V, so 2 LEDs = 2.4V
+      - Current per branch: (5V - 2.4V) / 10R ~ 260mA
+      - Total IR LED current: ~1A (use adequate MOSFET & PSU)
+
+================================================================================
+  5. POWER DISTRIBUTION
+================================================================================
+
+                        +-------------------+
+    Wall Adapter ------>| 5V 3A PSU         |
+    (5V 3A min)         +---+--------+------+
+                            |        |
+                         +--+--+  +--+--+
+                         | +5V |  | GND |
+                         +--+--+  +--+--+
+                            |        |
+              +-------------+--------+-----------+
+              |             |        |           |
+         RPi 5V(2,4)  Servo VCC  Laser VCC  IR LED VCC
+              |             |        |           |
+              |         Servo GND  MOSFET S   MOSFET S
+              |             |        |           |
+         RPi GND(6,9) -----+--------+-----------+
+              |
+              +--- ALL GROUNDS MUST BE COMMON ---+
+
+================================================================================
+  COMPLETE WIRING SUMMARY TABLE
+================================================================================
+
+  +------+--------+----------+-------------------------------------------+
+  | GPIO | Pin #  | Function | Connected To                              |
+  +------+--------+----------+-------------------------------------------+
+  | GP12 | Pin 32 | PWM0     | Pan Servo Signal (via 1K)                |
+  | GP13 | Pin 33 | PWM1     | Tilt Servo Signal (via 1K)               |
+  | GP18 | Pin 12 | OUTPUT   | Laser MOSFET Gate (via 1K, 10K pulldown) |
+  | GP24 | Pin 18 | OUTPUT   | 555 Timer RESET pin (enable IR LEDs)     |
+  | --   | Pin 2  | 5V       | Power rail (or use external PSU)         |
+  | --   | Pin 6  | GND      | Common ground                            |
+  | --   | Pin 14 | GND      | Laser MOSFET source ground               |
+  | --   | Pin 34 | GND      | Servo ground                             |
+  | --   | CSI    | Camera   | Pi Camera V2 (NoIR) ribbon cable         |
+  +------+--------+----------+-------------------------------------------+
+
+================================================================================
+  SAFETY NOTES
+================================================================================
+
+  1. LASER SAFETY: 5mW is Class 3R - avoid direct eye exposure
+     - Add a physical interlock switch in series with laser power
+     - Software must default to laser OFF on startup
+     - Consider enclosure with safety interlock
+
+  2. ELECTRICAL:
+     - Never exceed 16mA per GPIO pin (use MOSFETs for loads)
+     - Common ground between all power sources is CRITICAL
+     - Add 100uF electrolytic cap near servo power input
+     - Decouple 555 and MOSFET with 100nF ceramic caps
+
+  3. THERMAL:
+     - IRLZ44N for IR LEDs may need small heatsink at 1A
+     - Ensure adequate ventilation for RPi
+
+================================================================================
+  END OF SERVO VERSION WIRING DIAGRAM
+================================================================================

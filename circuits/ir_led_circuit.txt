@@ -1,0 +1,350 @@
+================================================================================
+  IR LED DRIVER CIRCUIT - MOSQUITO LASER TRACKER
+  Illumination Subsystem Design Document
+================================================================================
+
+  Project:  Mosquito Laser Tracking System
+  Module:   Active IR Illumination Driver
+  Revision: 1.0
+  Date:     2026-03-18
+
+================================================================================
+  1. OVERVIEW
+================================================================================
+
+This circuit provides modulated 850nm IR illumination for the mosquito tracking
+camera system. It drives 4x high-power IR LEDs using a 555 timer (astable mode)
+through a logic-level MOSFET. The frequency is adjustable from near-DC to ~1kHz
+to support:
+  - Continuous illumination for general tracking
+  - Modulated illumination for wing-beat frequency detection (~300-800 Hz)
+  - Software on/off control via Raspberry Pi GPIO
+
+================================================================================
+  2. DESIGN REQUIREMENTS
+================================================================================
+
+  - LED wavelength:       850nm (matches NoIR camera sensitivity)
+  - Number of LEDs:       4x high-power (e.g., Vishay TSAL6100, SFH 4715S)
+  - LED forward voltage:  ~1.4V each (typical for 850nm)
+  - LED forward current:  100mA per LED (continuous), 200mA peak (pulsed)
+  - Supply voltage:       12V DC (shared with other subsystems)
+  - Frequency range:      ~1 Hz to ~1 kHz (adjustable via potentiometer)
+  - Duty cycle:           ~10% to ~90% (adjustable via potentiometer)
+  - RPi enable control:   3.3V GPIO -> 555 RESET pin (active high)
+
+================================================================================
+  3. LED CONFIGURATION
+================================================================================
+
+Configuration: 2 series strings of 2 LEDs each, in parallel.
+
+  String 1: LED1 -> LED2 -> R_limit1
+  String 2: LED3 -> LED4 -> R_limit2
+
+  Voltage per string:  2 x 1.4V = 2.8V
+  MOSFET Rds(on):      ~0.022 ohm (negligible at Vgs=5V)
+  Voltage for Rlimit:  12V - 2.8V - Vds ≈ 9.0V
+
+  For 100mA per string:
+    R_limit = 9.0V / 0.100A = 90 ohm -> use 82 ohm + adjust
+    Use: R_limit = 82 ohm (standard value), 1W rated
+    Actual I = 9.0 / 82 = 109.8mA (acceptable)
+    Power:  P = (109.8mA)^2 x 82 = 0.99W -> use 1W or 2W resistor
+
+  Total LED current: ~220mA (both strings)
+
+  NOTE: For 5-LED option, use config: 3 series + 2 series in parallel
+    String A: 3 LEDs -> Vf = 4.2V, R = (12-4.2)/0.1 = 78 ohm -> 75 ohm
+    String B: 2 LEDs -> Vf = 2.8V, R = (12-2.8)/0.1 = 92 ohm -> 91 ohm
+
+================================================================================
+  4. 555 TIMER DESIGN (ASTABLE MODE)
+================================================================================
+
+  4.1 Standard Astable Formulas
+  -----------------------------
+
+  The 555 astable mode uses two resistors (Ra, Rb) and a capacitor (C):
+
+    t_high = 0.693 x (Ra + Rb) x C
+    t_low  = 0.693 x Rb x C
+    Period = t_high + t_low = 0.693 x (Ra + 2*Rb) x C
+    Freq   = 1.44 / ((Ra + 2*Rb) x C)
+    Duty%  = (Ra + Rb) / (Ra + 2*Rb) x 100
+
+  4.2 Modified Circuit for Independent Frequency/Duty Cycle Control
+  -----------------------------------------------------------------
+
+  We use a diode-modified astable circuit to allow near-independent control
+  of frequency and duty cycle:
+
+    - D1 (1N4148) across Rb: charge path bypasses Rb during HIGH
+    - Ra = POT1 (100K potentiometer) + R1 (1K fixed minimum)
+    - Rb = POT2 (100K potentiometer) + R2 (1K fixed minimum)
+
+  With diode modification:
+    t_high = 0.693 x Ra x C    (charges through Ra, bypasses Rb via D1)
+    t_low  = 0.693 x Rb x C    (discharges through Rb only)
+    Freq   = 1.44 / ((Ra + Rb) x C)
+    Duty%  = Ra / (Ra + Rb) x 100
+
+  4.3 Component Value Calculations
+  --------------------------------
+
+  Target frequency range: 1 Hz to 1000 Hz
+  We use a range capacitor selector (jumper) for sub-ranges:
+
+  RANGE A: C = 1uF (low frequency: ~7 Hz to ~720 Hz)
+    Min freq: Ra=101K, Rb=101K -> f = 1.44/(202K x 1uF) = 7.1 Hz
+    Max freq: Ra=1K, Rb=1K     -> f = 1.44/(2K x 1uF)   = 720 Hz
+
+  RANGE B: C = 100nF (high frequency: ~71 Hz to ~7.2 kHz)
+    Min freq: Ra=101K, Rb=101K -> f = 1.44/(202K x 100nF) = 71 Hz
+    Max freq: Ra=1K, Rb=1K     -> f = 1.44/(2K x 100nF)   = 7200 Hz
+
+  PRIMARY SELECTION: C = 470nF for sweet spot (~15 Hz to ~1.5 kHz)
+    Covers the mosquito wing-beat detection band (300-800 Hz)
+    Min freq: Ra=101K, Rb=101K -> f = 1.44/(202K x 470nF) = 15.2 Hz
+    Max freq: Ra=1K, Rb=1K     -> f = 1.44/(2K x 470nF)   = 1531 Hz
+
+  Selected values:
+    POT1 (Ra adjust):  100K linear potentiometer
+    POT2 (Rb adjust):  100K linear potentiometer
+    R1 (Ra minimum):   1K ohm (prevents zero-ohm condition)
+    R2 (Rb minimum):   1K ohm (prevents zero-ohm condition)
+    C1 (timing cap):   470nF (ceramic or film, low ESR)
+    C2 (bypass cap):   100nF ceramic on pin 5 (CONTROL)
+    C3 (supply bypass): 10uF electrolytic + 100nF ceramic on Vcc
+
+  4.4 RPi Enable Control
+  ----------------------
+
+  The 555 RESET pin (pin 4) is active-low. Connect RPi GPIO to RESET:
+    - GPIO HIGH (3.3V) -> 555 runs normally
+    - GPIO LOW  (0V)   -> 555 output forced LOW, LEDs off
+    - Pull-up R3 = 10K to Vcc ensures LEDs ON if RPi not connected
+    - Series R4 = 1K protects GPIO pin
+
+  For DC (always-on) mode: tie 555 RESET low, drive MOSFET gate directly
+  from RPi PWM pin through a voltage divider or level shifter.
+
+================================================================================
+  5. MOSFET DRIVER STAGE
+================================================================================
+
+  MOSFET: IRLZ44N (logic-level N-channel)
+    - Vgs(th):   1.0-2.0V (fully on at 4.5V gate drive)
+    - Rds(on):   0.022 ohm @ Vgs=5V
+    - Id(max):   47A (massively over-spec for 220mA - good thermal margin)
+    - Gate charge: 48nC
+
+  555 output (pin 3) drives MOSFET gate directly:
+    - 555 output HIGH ~ Vcc - 1.5V ~ 10.5V (at 12V supply)
+    - Well above Vgs threshold for full enhancement
+    - Gate resistor R5 = 100 ohm (limits ringing, slows edges slightly)
+    - Gate pulldown R6 = 10K (ensures MOSFET off when 555 not powered)
+
+  Power dissipation in MOSFET:
+    P = Rds(on) x I^2 = 0.022 x 0.22^2 = 1.06 mW (negligible, no heatsink)
+
+================================================================================
+  6. FULL SCHEMATIC (ASCII ART)
+================================================================================
+
+                        +12V DC SUPPLY
+                            |
+                 C3a        |        C3b
+                10uF        |       100nF
+                 |          |         |
+                 +----+-----+----+----+
+                      |          |
+                      |          |
+              +-------+-------+  |
+              |   NE555 (DIP) |  |
+              |               |  |
+              | 8 Vcc  4 RST |--+--[R3 10K]--+12V
+              |               |  |
+              |               |  +--[R4 1K]---< RPi GPIO (Enable)
+              |               |
+              |           7 DIS|---+
+              |               |    |
+              |               |    +---[R1 1K]---[POT1 100K]---+--+12V
+              |               |    |                            |
+              |               |    +----->|---[D1 1N4148]-------+
+              |               |    |
+              |               |    +---[R2 1K]---[POT2 100K]---+
+              |               |                                 |
+              | 6 THR  2 TRG |---+------------------------------+
+              |               |   |
+              |               |   +---[C1 470nF]---GND
+              |               |
+              |    5 CTRL     |---[C2 100nF]---GND
+              |               |
+              |    3 OUT      |---[R5 100R]---+
+              |               |               |
+              | 1 GND         |            GATE (G)
+              +-------+-------+               |
+                      |              +--------+--------+
+                      |              | IRLZ44N (MOSFET)|
+                      |              |   G     D     S |
+                      |              +--------+--------+
+                      |              |        |        |
+                      |         [R6 10K]   DRAIN    SOURCE
+                      |              |        |        |
+                      |             GND       |       GND
+                      |                       |
+                      |            +----------+-----------+
+                      |            |                      |
+                      |         LED String 1          LED String 2
+                      |            |                      |
+                      |        +12V-+                 +12V-+
+                      |            |                      |
+                      |          (A)|                    (A)|
+                      |         LED1 (850nm)            LED3 (850nm)
+                      |          (K)|                    (K)|
+                      |          (A)|                    (A)|
+                      |         LED2 (850nm)            LED4 (850nm)
+                      |          (K)|                    (K)|
+                      |            |                      |
+                      |       [R7 82R 1W]           [R8 82R 1W]
+                      |            |                      |
+                      |            +----------+-----------+
+                      |                       |
+                      |                    DRAIN (MOSFET)
+                      |
+                     GND
+
+  DETAIL: 555 Timer Diode-Modified Astable Wiring
+  ------------------------------------------------
+
+         +12V
+          |
+    [POT1 100K]---[R1 1K]---+---PIN 7 (DISCHARGE)
+                             |
+                    D1 ->|---+   (Cathode to pin 7, Anode to Rb junction)
+                             |
+                    [R2 1K]--+---[POT2 100K]---+---PIN 2 (TRIGGER)
+                                               |---PIN 6 (THRESHOLD)
+                                               |
+                                          [C1 470nF]
+                                               |
+                                              GND
+
+  DETAIL: RPi Enable Connection
+  -----------------------------
+
+    +12V ---[R3 10K]---+--- PIN 4 (RESET)
+                       |
+    RPi GPIO --[R4 1K]-+
+                       |
+                  [D2 3.3V Zener] (optional, clamp protection)
+                       |
+                      GND
+
+================================================================================
+  7. COMPLETE BILL OF MATERIALS
+================================================================================
+
+  Ref    Value          Package/Type           Qty   Notes
+  -----  -------------- ---------------------  ----  --------------------------
+  U1     NE555          DIP-8                   1    Timer IC (or CMOS TLC555)
+  Q1     IRLZ44N        TO-220                  1    Logic-level N-ch MOSFET
+  LED1-4 850nm IR LED   5mm or SMD              4    e.g., TSAL6100, SFH4715S
+  D1     1N4148         DO-35                   1    Signal diode (duty ctrl)
+  D2     3.3V Zener     DO-35                   1    Optional GPIO protection
+  POT1   100K linear    Panel mount             1    Frequency adjust
+  POT2   100K linear    Panel mount             1    Duty cycle adjust
+  R1     1K ohm         1/4W                    1    Min Ra resistance
+  R2     1K ohm         1/4W                    1    Min Rb resistance
+  R3     10K ohm        1/4W                    1    Reset pull-up
+  R4     1K ohm         1/4W                    1    GPIO series protect
+  R5     100 ohm        1/4W                    1    Gate series resistor
+  R6     10K ohm        1/4W                    1    Gate pull-down
+  R7     82 ohm         1W or 2W                1    LED string 1 current limit
+  R8     82 ohm         1W or 2W                1    LED string 2 current limit
+  C1     470nF          Ceramic/Film            1    Timing capacitor
+  C2     100nF          Ceramic                 1    Control pin bypass
+  C3a    10uF           Electrolytic            1    Supply decoupling
+  C3b    100nF          Ceramic                 1    Supply HF bypass
+  J1     2-pin header   2.54mm                  1    12V power input
+  J2     2-pin header   2.54mm                  1    RPi GPIO input
+
+================================================================================
+  8. OPERATING MODES
+================================================================================
+
+  Mode 1: CONTINUOUS ILLUMINATION
+    - Set POT1 to minimum, POT2 to minimum
+    - Frequency ~1.5 kHz, duty cycle ~50%
+    - At high frequency, LEDs appear continuously on to camera
+    - Or: hold 555 RESET high, LEDs always on
+
+  Mode 2: MODULATED (WING-BEAT DETECTION)
+    - Set frequency to 300-800 Hz range via POT1/POT2
+    - Camera detects wing-beat interference pattern
+    - Helps distinguish mosquitoes from other insects
+
+  Mode 3: SOFTWARE CONTROLLED
+    - RPi toggles GPIO to enable/disable illumination
+    - Can pulse at arbitrary patterns via software
+    - For PWM dimming: use RPi hardware PWM on MOSFET gate directly
+      (bypass 555, connect RPi PWM -> level shifter -> R5 -> gate)
+
+================================================================================
+  9. IMPORTANT DESIGN NOTES
+================================================================================
+
+  1. THERMAL: At 110mA continuous per string, each current-limiting resistor
+     dissipates ~1W. Use 2W resistors or provide airflow. The LEDs themselves
+     dissipate ~154mW each (1.4V x 110mA) - within spec for most 5mm packages.
+
+  2. EYE SAFETY: 850nm IR is invisible but can damage eyes. Never look
+     directly into the LEDs. Consider using 940nm instead if the camera
+     sensor has adequate sensitivity (less visible afterglow at 940nm).
+
+  3. EMI: Keep wires short between 555 and MOSFET gate. The 100 ohm gate
+     resistor reduces ringing. Bypass caps must be physically close to IC.
+
+  4. CAPACITOR SELECTION: Use film or C0G/NP0 ceramic for C1 (timing).
+     X7R or X5R ceramics have voltage-dependent capacitance which shifts
+     the frequency. Electrolytic caps are unsuitable for timing.
+
+  5. 555 VARIANT: A CMOS 555 (TLC555, ICM7555) can run on 3.3V-15V,
+     draws less current (~100uA vs ~10mA), and has rail-to-rail output.
+     Recommended if supply noise is a concern.
+
+  6. ALTERNATIVE LED CONFIG (5 LEDs):
+     String A: 3 LEDs in series (Vf=4.2V), R=75 ohm 1W
+     String B: 2 LEDs in series (Vf=2.8V), R=91 ohm 1W
+     Both strings in parallel, driven by same MOSFET.
+
+  7. CURRENT SENSING (optional): Add a 1-ohm sense resistor between
+     MOSFET source and GND. Measure voltage across it for current
+     monitoring (1 ohm x 220mA = 220mV, readable by RPi ADC).
+
+  8. CONNECTOR: Use JST or Molex connectors for LED wiring to allow
+     repositioning the LED array around the camera lens.
+
+================================================================================
+  10. QUICK REFERENCE: FREQUENCY TABLE
+================================================================================
+
+  C1=470nF, Diode-modified astable (Ra ~ Rb for ~50% duty cycle)
+
+  POT1+R1   POT2+R2   Ra+Rb     Frequency    Application
+  --------  --------  --------  -----------  ----------------------
+  1K        1K        2K        1531 Hz      High-speed modulation
+  5K        5K        10K       306 Hz       Low wing-beat range
+  3K        3K        6K        511 Hz       Mid wing-beat range
+  2K        2K        4K        766 Hz       High wing-beat range
+  10K       10K       20K       153 Hz       Slow flash
+  50K       50K       100K      30.6 Hz      Visible strobe
+  100K      100K      200K      15.3 Hz      Near-DC equivalent
+
+  For asymmetric duty cycles (e.g., 25% duty):
+    Set Ra = 1/3 x Rb  (e.g., Ra=10K, Rb=30K -> 25% duty, 86 Hz)
+
+================================================================================
+  END OF DOCUMENT
+================================================================================

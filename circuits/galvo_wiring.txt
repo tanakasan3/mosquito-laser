@@ -1,0 +1,488 @@
+================================================================================
+   MOSQUITO LASER TRACKER - GALVO VERSION - COMPLETE WIRING DIAGRAM
+================================================================================
+
+  Author:  Mosquito Laser Project
+  Rev:     1.0
+  Notes:   All GPIO references use BCM numbering
+           SPI0 bus used for MCP4922 dual DAC (galvo X/Y control)
+           Power rails: 5V from external PSU, +/-12V for galvo amps
+           Logic level: 3.3V (RPi GPIO)
+
+================================================================================
+  SYSTEM BLOCK DIAGRAM
+================================================================================
+
+  +-------------+     CSI Ribbon     +----------------+
+  |  Raspberry  |<==================>|   Pi Camera    |
+  |   Pi 4B     |                    |   V2 (NoIR)    |
+  |             |                    +----------------+
+  |  SPI0_MOSI -+---> MCP4922 DAC ---> Galvo X Driver ---> X Mirror
+  |  SPI0_SCLK -+---> MCP4922 DAC ---> Galvo Y Driver ---> Y Mirror
+  |  SPI0_CE0  -+---> MCP4922 ~CS
+  |  GPIO18 ----+----- MOSFET -----> 5mW Laser Module
+  |  GPIO24 ----+----- 555 Timer --> IR LED Array
+  +-------------+
+
+================================================================================
+  RASPBERRY PI 4 - GPIO HEADER (40-PIN) - RELEVANT PINS
+================================================================================
+
+                        +-----+-----+
+                        | 3V3 | 5V  |  Pin 1,2
+                        +-----+-----+
+                        | GP2 | 5V  |  Pin 3,4
+                        +-----+-----+
+                        | GP3 | GND |  Pin 5,6
+                        +-----+-----+
+                        | GP4 | GP14|  Pin 7,8
+                        +-----+-----+
+                        | GND | GP15|  Pin 9,10
+                        +-----+-----+
+                        | GP17| GP18|  Pin 11,12  <-- GP18: LASER MOSFET
+                        +-----+-----+
+                        | GP27| GND |  Pin 13,14
+                        +-----+-----+
+                        | GP22| GP23|  Pin 15,16
+                        +-----+-----+
+                        | 3V3 | GP24|  Pin 17,18  <-- GP24: 555 TIMER RESET
+                        +-----+-----+
+                 SPI--> | GP10| GND |  Pin 19,20  <-- GP10: SPI0_MOSI
+                        +-----+-----+
+                        | GP9 | GP25|  Pin 21,22  <-- GP9:  SPI0_MISO (unused)
+                        +-----+-----+
+                 SPI--> | GP11| GP8 |  Pin 23,24  <-- GP11: SPI0_SCLK
+                        +-----+-----+                 GP8:  SPI0_CE0
+                        | GND | GP7 |  Pin 25,26
+                        +-----+-----+
+                        | GP0 | GP1 |  Pin 27,28
+                        +-----+-----+
+                        | GP5 | GND |  Pin 29,30
+                        +-----+-----+
+                        | GP6 | GP12|  Pin 31,32
+                        +-----+-----+
+                        | GP13| GND |  Pin 33,34
+                        +-----+-----+
+                        | GP19| GP16|  Pin 35,36
+                        +-----+-----+
+                        | GP26| GP20|  Pin 37,38
+                        +-----+-----+
+                        | GND | GP21|  Pin 39,40
+                        +-----+-----+
+
+================================================================================
+  1. PI CAMERA V2 (NoIR) CONNECTION
+================================================================================
+
+    Raspberry Pi 4                    Pi Camera V2 (NoIR recommended)
+    +------------+                    +-------------------+
+    |            |   15-pin CSI       |                   |
+    |  CSI Port  |====================|  Ribbon Connector |
+    |  (between  |  (flat ribbon      |                   |
+    |  HDMI &    |   cable, contacts  +-------------------+
+    |  audio)    |   facing HDMI port
+    +------------+   on Pi side)
+
+    Notes: - Use NoIR (No IR filter) camera for IR illumination sensitivity
+           - Enable camera in raspi-config: Interface Options > Camera
+
+================================================================================
+  2. MCP4922 DUAL SPI DAC --> GALVANOMETER MIRRORS
+================================================================================
+
+    The MCP4922 is a dual 12-bit DAC with SPI interface.
+    Channel A = X-axis galvo, Channel B = Y-axis galvo.
+    Output range: 0V to Vref (using 2.048V or 3.3V reference).
+
+    MCP4922 PINOUT (DIP-14 / SOIC-14, top view):
+
+              +------U------+
+       VDD  1 |             | 14  VS (analog supply)
+       ~CS  2 |   MCP4922   | 13  VOUTA (X-axis)
+       SCK  3 |   12-bit    | 12  VREFB
+       SDI  4 |   Dual DAC  | 11  VOUTB (Y-axis)
+       ~LDAC 5|             | 10  VREFB (tied to VREFA)
+     ~SHDN  6 |             | 9   AVSS (analog GND)
+       VSSA  7|             | 8   VREFA
+              +-------------+
+
+    SPI WIRING: RPi --> MCP4922:
+
+    +------------------+--------+---------------------------------+
+    | Raspberry Pi     | Pin #  | MCP4922 Pin                     |
+    +------------------+--------+---------------------------------+
+    | GPIO10 (MOSI)    | Pin 19 | Pin 4  (SDI)  - Serial Data In |
+    | GPIO11 (SCLK)    | Pin 23 | Pin 3  (SCK)  - Serial Clock   |
+    | GPIO8  (CE0)     | Pin 24 | Pin 2  (~CS)  - Chip Select    |
+    | GND              | Pin 25 | Pin 7  (VSSA) - Digital GND    |
+    | GND              | Pin 25 | Pin 9  (AVSS) - Analog GND     |
+    | 3.3V             | Pin 1  | Pin 1  (VDD)  - Digital VCC    |
+    | 3.3V             | Pin 1  | Pin 14 (VS)   - Analog VCC     |
+    +------------------+--------+---------------------------------+
+
+    Additional MCP4922 connections:
+    - Pin 5  (~LDAC) --> GND (update outputs immediately)
+    - Pin 6  (~SHDN) --> VDD (always enabled)
+    - Pin 8  (VREFA) --> 2.048V reference OR 3.3V
+    - Pin 10 (VREFB) --> tied to VREFA
+
+    Schematic:
+
+    RPi 3.3V (Pin 1) ------+--------+--------+-----------+
+                            |        |        |           |
+                         MCP4922   MCP4922  MCP4922    [Vref]
+                         Pin 1     Pin 14   Pin 6      2.048V
+                         (VDD)     (VS)    (~SHDN)    or 3.3V
+                                                        |
+                                                   MCP4922 Pin 8
+                                                   (VREFA)
+                                                        |
+                                                   MCP4922 Pin 10
+                                                   (VREFB)
+
+    RPi MOSI (Pin 19) -------------- MCP4922 Pin 4 (SDI)
+
+    RPi SCLK (Pin 23) -------------- MCP4922 Pin 3 (SCK)
+
+    RPi CE0  (Pin 24) -------------- MCP4922 Pin 2 (~CS)
+
+    RPi GND  (Pin 25) ------+------- MCP4922 Pin 7 (VSSA)
+                             +------- MCP4922 Pin 9 (AVSS)
+                             +------- MCP4922 Pin 5 (~LDAC)
+
+    MCP4922 Pin 13 (VOUTA) -------> X Galvo Driver Input
+    MCP4922 Pin 11 (VOUTB) -------> Y Galvo Driver Input
+
+================================================================================
+  3. GALVANOMETER MIRROR DRIVER AMPLIFIER STAGE
+================================================================================
+
+    The MCP4922 outputs 0-Vref (low current). Galvo mirrors need
+    a bipolar signal with significant current drive. Use op-amp
+    driver stages to convert DAC output to galvo-compatible signal.
+
+    Recommended: TL072 dual op-amp or dedicated galvo driver board.
+
+    DAC OUTPUT --> OP-AMP DRIVER --> GALVO COIL
+
+    For each axis (X and Y):
+
+                           +12V
+                            |
+                    +-------+-------+
+                    |               |
+                    |   +-------+   |
+    MCP4922 VOUT ---+---|+      |   |
+    (0 to Vref)    |   | TL072 |---+-----> Galvo Mirror (+)
+                   |   |  x2   |   |
+    Vref/2 --------|---|-      |   |       Galvo Mirror (-)
+    (offset bias)  |   +-------+   |           |
+                   |       |       |           |
+                   |      -12V     |           |
+                   |               |           |
+                   +-------+-------+-----------+
+                           |
+                          GND
+
+    DETAILED GALVO DRIVER (per axis):
+
+                              +12V
+                               |
+                          +----+----+
+                          |         |
+                        [100nF]   [10uF]
+                          |         |
+                          +----+----+
+                               |
+                      Vcc(+)   |
+                    +----------+
+                    |  TL072   |
+    VOUTA/B ---[10K]--|(+)     |
+                    |       OUT|---[100R]---+---> GALVO COIL (+)
+    Vref/2 ---[10K]--|(-)     |            |
+                    |          |          [GALVO]
+                    +----------+            |
+                          |            GALVO COIL (-)
+                      Vcc(-)                |
+                          |                GND
+                          |
+                        -12V
+
+    Voltage Offset Bias (Vref/2 generation):
+
+    Vref ----[10K]---+----> Vref/2 (to op-amp inverting input)
+                     |
+                   [10K]
+                     |
+                    GND
+
+    This converts unipolar DAC (0 to Vref) into bipolar swing
+    centered at 0V: -(Vref/2) to +(Vref/2) --> drives galvo
+    bidirectionally.
+
+    COMPLETE GALVO SIGNAL PATH:
+
+    +-------+     SPI      +---------+   Analog   +---------+   Current  +-------+
+    |  RPi  |------------>| MCP4922 |---------->| TL072   |---------->| GALVO |
+    | SPI0  |  MOSI/SCLK  | Ch.A    | 0-3.3V    | Amp #1  | +/-V     | X-Mir |
+    |       |  /CE0        | Ch.B    |           | Amp #2  |          | Y-Mir |
+    +-------+              +---------+           +---------+          +-------+
+
+================================================================================
+  4. LASER MODULE (5mW 650nm Red) via N-Channel MOSFET
+================================================================================
+
+    Identical to servo version - MOSFET-switched laser.
+
+                            +5V (from PSU)
+                             |
+                      +------+------+
+                      |  5mW LASER  |
+                      |  MODULE     |
+                      |  (650nm)    |
+                      |  +    -     |
+                      +--+----+-----+
+                         |    |
+                         |    +------ DRAIN (D)
+                         |            |
+                         |       +----+----+
+                         |       | IRLZ44N |
+                         |       | N-MOSFET|
+                         |       +----+----+
+                         |       GATE |    SOURCE (S)
+                         |         |  |      |
+                         |     [1K]+  |      |
+                         |         |  |      |
+    RPi GPIO18 (Pin 12)--+--------+  |      |
+                                      |      |
+                               [10K] +      |
+                                      |      |
+    RPi GND (Pin 14) ----------------+------+------ GND
+
+    FULL CIRCUIT:
+
+         +5V PSU ----+
+                      |
+               [Laser Module +]
+               [Laser Module -]
+                      |
+                      D
+                 +---------+
+    GPIO18--[1K]-+--G      |
+                 |  IRLZ44N|
+                 +----S----+
+                 |    |
+              [10K]   |
+                 |    |
+    GND ---------+----+
+
+================================================================================
+  5. IR LED ILLUMINATION - 555 TIMER + MOSFET DRIVER
+================================================================================
+
+    Identical to servo version.
+
+    555 TIMER PINOUT (DIP-8, top view):
+
+            +----U----+
+     GND  1 |         | 8  VCC (+5V)
+    TRIG  2 |  NE555  | 7  DISCH
+     OUT  3 |         | 6  THRESH
+    ~RST  4 |         | 5  CTRL
+            +---------+
+
+    FULL IR ILLUMINATION CIRCUIT:
+
+                                    +5V
+                                     |
+                          +----------+----------+
+                          |          |          |
+                        [100nF]      |        [R1=1K]
+                          |          |          |
+                          |     +----+----+     |
+                          |     |8  VCC   |     |
+                          |     |         7|----+
+                          |     |  NE555  |     |
+    RPi GPIO24 (Pin 18)--+-----|4 ~RESET |   [R2=10K POT]
+                          |     |         |     |
+                          |     |3  OUT   6|----+----+
+                          |     |         |     |    |
+                          |     |2  TRIG  5|  [100nF]|
+                          |     +----+----+     |    |
+                          |          |1         |    |
+                          |          |          |    |
+                          +----------+----------+    |
+                          |                          |
+                         GND                         |
+                                                     |
+                                    +--- THRESH/TRIG -+
+                                    |
+                                  [C1=10nF]
+                                    |
+                                   GND
+
+    555 OUT (Pin 3) --> MOSFET --> IR LED Array (8x 850nm LEDs):
+
+    555 Pin 3 (OUT) ----[100R]---+
+                                  |
+                                 GATE
+                            +---------+
+                            | IRLZ44N |
+                            | N-MOSFET|
+                            +----+----+
+                           D     |     S
+                           |   [10K]   |
+                           |     |     |
+                           |    GND   GND
+                           |
+              +5V          |
+               |           |
+          +----+----+------+----+------+----+------+----+
+          |         |           |           |           |
+        [10R]     [10R]      [10R]       [10R]         |
+          |         |           |           |           |
+        [LED1]    [LED3]      [LED5]      [LED7]       |
+        (850nm)   (850nm)    (850nm)     (850nm)       |
+          |         |           |           |           |
+        [LED2]    [LED4]      [LED6]      [LED8]       |
+        (850nm)   (850nm)    (850nm)     (850nm)       |
+          |         |           |           |           |
+          +----+----+------+----+------+----+-----------+
+               |
+              DRAIN (MOSFET)
+
+================================================================================
+  6. POWER DISTRIBUTION
+================================================================================
+
+    THREE power domains required for galvo version:
+
+    +------------------+
+    | Wall Adapter     |
+    | 5V 3A (RPi/LEDs)|------+--------+--------+-----------+
+    +------------------+      |        |        |           |
+                         RPi 5V   Laser VCC  IR LED VCC   MCP4922
+                         (Pin 2)                          (3.3V via RPi)
+                              |        |        |
+                         RPi GND   MOSFET S  MOSFET S
+                         (Pin 6)
+                              |        |        |
+                              +--------+--------+----- COMMON GND
+
+    +------------------+
+    | +12V PSU         |------+---> TL072 Vcc(+), Galvo supply (+)
+    | (galvo driver)   |      |
+    +------------------+      +---> GND (common with 5V GND!)
+
+    +------------------+
+    | -12V PSU         |------+---> TL072 Vcc(-), Galvo supply (-)
+    | (galvo driver)   |      |
+    +------------------+      +---> GND (common)
+
+    NOTE: A dual-rail +/-12V PSU (e.g., from a single 24V supply with
+    virtual ground) is ideal. All GND rails MUST be connected together.
+
+================================================================================
+  COMPLETE WIRING SUMMARY TABLE
+================================================================================
+
+  +----------+--------+------------+------------------------------------------+
+  | GPIO/Fn  | Pin #  | Function   | Connected To                             |
+  +----------+--------+------------+------------------------------------------+
+  | GP10     | Pin 19 | SPI0_MOSI  | MCP4922 Pin 4 (SDI)                     |
+  | GP11     | Pin 23 | SPI0_SCLK  | MCP4922 Pin 3 (SCK)                     |
+  | GP8      | Pin 24 | SPI0_CE0   | MCP4922 Pin 2 (~CS)                     |
+  | GP18     | Pin 12 | OUTPUT     | Laser MOSFET Gate (via 1K, 10K pull-dn)  |
+  | GP24     | Pin 18 | OUTPUT     | 555 Timer RESET pin (enable IR LEDs)     |
+  | 3V3      | Pin 1  | 3.3V       | MCP4922 VDD, VS, ~SHDN, Vref            |
+  | 5V       | Pin 2  | 5V         | 555 timer, laser, IR LEDs                |
+  | GND      | Pin 6  | GND        | Common ground                            |
+  | GND      | Pin 25 | GND        | MCP4922 VSSA, AVSS, ~LDAC               |
+  | --       | CSI    | Camera     | Pi Camera V2 (NoIR) ribbon cable         |
+  +----------+--------+------------+------------------------------------------+
+
+  MCP4922 OUTPUT ROUTING:
+  +----------+--------------------+--------------------+---------------------+
+  | DAC Ch.  | MCP4922 Pin        | Op-Amp             | Destination         |
+  +----------+--------------------+--------------------+---------------------+
+  | Ch. A    | Pin 13 (VOUTA)     | TL072 #1           | X-Axis Galvo Mirror |
+  | Ch. B    | Pin 11 (VOUTB)     | TL072 #2           | Y-Axis Galvo Mirror |
+  +----------+--------------------+--------------------+---------------------+
+
+================================================================================
+  KEY DIFFERENCES FROM SERVO VERSION
+================================================================================
+
+  1. SERVOS REPLACED BY GALVOS:
+     - GPIO12/13 PWM pins are FREE (no longer used for servos)
+     - SPI0 bus (GP10, GP11, GP8) now used for MCP4922 DAC
+     - DAC provides 12-bit (4096 step) analog output for each axis
+     - Op-amp stage converts 0-3.3V unipolar to bipolar galvo signal
+
+  2. SPEED ADVANTAGE:
+     - Servo: ~50-100ms repositioning time
+     - Galvo: ~1-5ms repositioning time (20-100x faster)
+     - SPI clock up to 20MHz, full DAC update in <1us
+
+  3. ADDITIONAL POWER REQUIREMENTS:
+     - +/-12V dual-rail supply needed for galvo driver op-amps
+     - Galvo coils draw 100-500mA per axis depending on model
+
+  4. PRECISION:
+     - Servo: ~0.5 deg resolution (limited by PWM granularity)
+     - Galvo + 12-bit DAC: ~0.01 deg resolution over scan range
+
+================================================================================
+  SAFETY NOTES
+================================================================================
+
+  1. LASER SAFETY: 5mW is Class 3R - avoid direct eye exposure
+     - Add a physical interlock switch in series with laser power
+     - Software must default to laser OFF on startup
+     - Galvo version scans FAST - ensure beam path is enclosed
+
+  2. ELECTRICAL:
+     - Never exceed 16mA per GPIO pin (use MOSFETs for loads)
+     - Common ground between ALL power sources is CRITICAL
+     - +/-12V galvo supply: double-check polarity before powering on
+     - Decouple all ICs with 100nF ceramic caps close to VCC pins
+
+  3. GALVO-SPECIFIC:
+     - Never drive galvos beyond rated angle (mechanical damage)
+     - Implement software limits on DAC output values
+     - Galvo coils are inductive - ensure driver can handle back-EMF
+     - Start with low-amplitude signals and increase gradually
+
+  4. THERMAL:
+     - IRLZ44N for IR LEDs may need small heatsink at 1A
+     - TL072 op-amps are low power, no heatsink needed
+     - Ensure adequate ventilation for RPi
+
+================================================================================
+  SPI DATA FORMAT FOR MCP4922
+================================================================================
+
+  16-bit write command (MSB first):
+
+  Bit 15: A/~B    - 0=Channel A (X), 1=Channel B (Y)
+  Bit 14: BUF     - 1=Buffered Vref
+  Bit 13: ~GA     - 1=1x gain, 0=2x gain
+  Bit 12: ~SHDN   - 1=Active, 0=Shutdown channel
+  Bits 11-0: DATA - 12-bit DAC value (0-4095)
+
+  Example: Write 2048 to Channel A (mid-scale):
+    0x3800 = 0011 1000 0000 0000
+    A/~B=0, BUF=0, ~GA=1, ~SHDN=1, DATA=0x800
+
+  Python (spidev):
+    import spidev
+    spi = spidev.SpiDev()
+    spi.open(0, 0)  # Bus 0, CE0
+    spi.max_speed_hz = 10000000
+    def write_dac(channel, value):
+        cmd = (channel << 15) | (1 << 13) | (1 << 12) | (value & 0xFFF)
+        spi.xfer2([(cmd >> 8) & 0xFF, cmd & 0xFF])
+
+================================================================================
+  END OF GALVO VERSION WIRING DIAGRAM
+================================================================================

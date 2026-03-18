@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🦟 Mosquito Laser Tracker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #00ff41;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+  }
+  .header {
+    background: #111;
+    border-bottom: 1px solid #00ff41;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 { font-size: 18px; letter-spacing: 2px; }
+  .header .status {
+    display: flex;
+    gap: 15px;
+  }
+  .header .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+  }
+  .dot.on  { background: #00ff41; box-shadow: 0 0 8px #00ff41; }
+  .dot.off { background: #333; }
+
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    height: calc(100vh - 50px);
+  }
+
+  .video-panel {
+    position: relative;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .video-panel img {
+    max-width: 100%;
+    max-height: 100%;
+    image-rendering: pixelated;
+  }
+  .video-panel .feed-label {
+    position: absolute;
+    top: 10px; left: 10px;
+    background: rgba(0,0,0,0.7);
+    padding: 3px 10px;
+    border: 1px solid #00ff41;
+    font-size: 12px;
+  }
+  .feed-tabs {
+    position: absolute;
+    top: 10px; right: 10px;
+    display: flex; gap: 5px;
+  }
+  .feed-tabs button {
+    background: #111;
+    border: 1px solid #00ff41;
+    color: #00ff41;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .feed-tabs button.active {
+    background: #00ff41;
+    color: #000;
+  }
+
+  .sidebar {
+    background: #0d0d0d;
+    border-left: 1px solid #1a3a1a;
+    overflow-y: auto;
+    padding: 15px;
+  }
+
+  .panel {
+    margin-bottom: 15px;
+    border: 1px solid #1a3a1a;
+  }
+  .panel-title {
+    background: #111;
+    padding: 6px 12px;
+    font-size: 13px;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #1a3a1a;
+    color: #00cc33;
+  }
+  .panel-body {
+    padding: 10px 12px;
+  }
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    border-bottom: 1px solid #0a1a0a;
+  }
+  .stat-label { color: #669966; }
+  .stat-value { color: #00ff41; font-weight: bold; }
+
+  .controls { display: flex; flex-direction: column; gap: 8px; }
+  .btn {
+    background: #111;
+    border: 1px solid #00ff41;
+    color: #00ff41;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    text-align: center;
+    transition: all 0.1s;
+  }
+  .btn:hover { background: #00ff41; color: #000; }
+  .btn.danger { border-color: #ff4444; color: #ff4444; }
+  .btn.danger:hover { background: #ff4444; color: #000; }
+  .btn.active { background: #00ff41; color: #000; }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .slider-row label { min-width: 100px; color: #669966; }
+  .slider-row input[type=range] {
+    flex: 1;
+    accent-color: #00ff41;
+  }
+  .slider-row .val { min-width: 40px; text-align: right; }
+
+  .track-list {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .track-item {
+    padding: 5px 8px;
+    border-bottom: 1px solid #0a1a0a;
+    display: flex;
+    justify-content: space-between;
+  }
+  .track-item.confirmed { color: #ff4444; }
+  .track-item.unconfirmed { color: #666; }
+
+  .log-box {
+    background: #000;
+    border: 1px solid #1a3a1a;
+    padding: 8px;
+    font-size: 11px;
+    max-height: 150px;
+    overflow-y: auto;
+    color: #669966;
+  }
+  .log-box .log-warn { color: #ffaa00; }
+  .log-box .log-err  { color: #ff4444; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🦟 MOSQUITO LASER TRACKER</h1>
+  <div class="status">
+    <span><span class="dot" id="dot-cam"></span>CAM</span>
+    <span><span class="dot" id="dot-laser"></span>LASER</span>
+    <span><span class="dot" id="dot-ir"></span>IR</span>
+    <span><span class="dot" id="dot-aim"></span>AIM</span>
+  </div>
+</div>
+
+<div class="main">
+  <!-- Video feed -->
+  <div class="video-panel">
+    <div class="feed-label" id="feed-label">ANNOTATED</div>
+    <div class="feed-tabs">
+      <button class="active" onclick="switchFeed('annotated')">Annotated</button>
+      <button onclick="switchFeed('raw')">Raw</button>
+      <button onclick="switchFeed('mask')">FG Mask</button>
+    </div>
+    <img id="video-feed" src="/video_feed/annotated" alt="Video Feed">
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Detection Stats -->
+    <div class="panel">
+      <div class="panel-title">📊 DETECTION</div>
+      <div class="panel-body">
+        <div class="stat-row"><span class="stat-label">FPS</span><span class="stat-value" id="s-fps">--</span></div>
+        <div class="stat-row"><span class="stat-label">Raw Blobs</span><span class="stat-value" id="s-raw">--</span></div>
+        <div class="stat-row"><span class="stat-label">Filtered</span><span class="stat-value" id="s-filt">--</span></div>
+        <div class="stat-row"><span class="stat-label">Active Tracks</span><span class="stat-value" id="s-tracks">--</span></div>
+        <div class="stat-row"><span class="stat-label">Confirmed</span><span class="stat-value" id="s-confirmed">--</span></div>
+        <div class="stat-row"><span class="stat-label">Total Created</span><span class="stat-value" id="s-total">--</span></div>
+      </div>
+    </div>
+
+    <!-- Tracks -->
+    <div class="panel">
+      <div class="panel-title">🎯 ACTIVE TRACKS</div>
+      <div class="panel-body">
+        <div class="track-list" id="track-list">
+          <div style="color: #666;">No targets</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="panel">
+      <div class="panel-title">🎮 CONTROLS</div>
+      <div class="panel-body controls">
+        <button class="btn" id="btn-laser" onclick="apiPost('/api/laser/toggle')">LASER: --</button>
+        <button class="btn" id="btn-ir" onclick="apiPost('/api/ir/toggle')">IR LEDS: --</button>
+        <button class="btn" id="btn-aim" onclick="apiPost('/api/aim/center')">CENTER AIM</button>
+        <button class="btn danger" id="btn-reset" onclick="apiPost('/api/detector/reset')">RESET DETECTOR</button>
+      </div>
+    </div>
+
+    <!-- Tuning -->
+    <div class="panel">
+      <div class="panel-title">🔧 TUNING</div>
+      <div class="panel-body">
+        <div class="slider-row">
+          <label>Min Area</label>
+          <input type="range" min="1" max="100" value="4" id="sl-min-area"
+                 oninput="tuneParam('min_area', this.value)">
+          <span class="val" id="v-min-area">4</span>
+        </div>
+        <div class="slider-row">
+          <label>Max Area</label>
+          <input type="range" min="50" max="2000" value="600" id="sl-max-area"
+                 oninput="tuneParam('max_area', this.value)">
+          <span class="val" id="v-max-area">600</span>
+        </div>
+        <div class="slider-row">
+          <label>BG Threshold</label>
+          <input type="range" min="4" max="80" value="16" id="sl-bg-thresh"
+                 oninput="tuneParam('bg_threshold', this.value)">
+          <span class="val" id="v-bg-thresh">16</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Aimer State -->
+    <div class="panel">
+      <div class="panel-title">📐 AIMER STATE</div>
+      <div class="panel-body">
+        <div class="stat-row"><span class="stat-label">Mode</span><span class="stat-value" id="s-aim-mode">--</span></div>
+        <div class="stat-row"><span class="stat-label">Position</span><span class="stat-value" id="s-aim-pos">--</span></div>
+        <div class="stat-row"><span class="stat-label">Target</span><span class="stat-value" id="s-aim-target">--</span></div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="panel">
+      <div class="panel-title">📋 LOG</div>
+      <div class="panel-body">
+        <div class="log-box" id="log-box"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentFeed = 'annotated';
+
+function switchFeed(feed) {
+  currentFeed = feed;
+  document.getElementById('video-feed').src = '/video_feed/' + feed + '?' + Date.now();
+  document.getElementById('feed-label').textContent = feed.toUpperCase();
+  document.querySelectorAll('.feed-tabs button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+function apiPost(url) {
+  fetch(url, {method: 'POST'}).then(r => r.json()).then(d => {
+    addLog('API: ' + url + ' -> OK');
+  }).catch(e => addLog('API error: ' + e, 'err'));
+}
+
+function tuneParam(param, value) {
+  document.getElementById('v-' + param.replace('_', '-').replace('_','-')).textContent = value;
+  fetch('/api/tune', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({[param]: parseInt(value)})
+  });
+}
+
+function addLog(msg, cls='') {
+  const box = document.getElementById('log-box');
+  const el = document.createElement('div');
+  el.className = cls ? 'log-' + cls : '';
+  const ts = new Date().toLocaleTimeString();
+  el.textContent = '[' + ts + '] ' + msg;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  // Keep last 100 entries
+  while (box.children.length > 100) box.removeChild(box.firstChild);
+}
+
+function updateStatus() {
+  fetch('/api/status').then(r => r.json()).then(d => {
+    // Detection stats
+    document.getElementById('s-fps').textContent = d.detector.fps.toFixed(1);
+    document.getElementById('s-raw').textContent = d.detector.detections_raw;
+    document.getElementById('s-filt').textContent = d.detector.detections_filtered;
+    document.getElementById('s-tracks').textContent = d.detector.active_tracks;
+    document.getElementById('s-confirmed').textContent = d.detector.confirmed_tracks;
+    document.getElementById('s-total').textContent = d.detector.total_tracks_created;
+
+    // Status dots
+    setDot('dot-cam', true);
+    setDot('dot-laser', d.laser.on);
+    setDot('dot-ir', d.ir.on);
+    setDot('dot-aim', d.aimer.enabled);
+
+    // Buttons
+    document.getElementById('btn-laser').textContent =
+      'LASER: ' + (d.laser.enabled ? (d.laser.on ? '🔴 ON' : 'OFF') : 'DISABLED');
+    document.getElementById('btn-ir').textContent =
+      'IR LEDS: ' + (d.ir.on ? '🟢 ON' : 'OFF');
+
+    // Aimer
+    document.getElementById('s-aim-mode').textContent = d.aim_mode;
+    if (d.aim_mode === 'servo') {
+      document.getElementById('s-aim-pos').textContent =
+        'P:' + d.aimer.pan + '° T:' + d.aimer.tilt + '°';
+    } else if (d.aim_mode === 'galvo') {
+      document.getElementById('s-aim-pos').textContent =
+        'X:' + d.aimer.x + ' Y:' + d.aimer.y;
+    }
+    document.getElementById('s-aim-target').textContent =
+      d.target ? '#' + d.target.id + ' (' + d.target.x + ',' + d.target.y + ')' : 'none';
+
+    // Tracks
+    const tl = document.getElementById('track-list');
+    if (d.tracks.length === 0) {
+      tl.innerHTML = '<div style="color:#666">No targets</div>';
+    } else {
+      tl.innerHTML = d.tracks.map(t =>
+        `<div class="track-item ${t.confirmed ? 'confirmed' : 'unconfirmed'}">
+          <span>#${t.id} ${t.confirmed ? '🎯' : '?'}</span>
+          <span>(${t.x},${t.y}) v=${t.speed}</span>
+        </div>`
+      ).join('');
+    }
+  }).catch(() => {
+    setDot('dot-cam', false);
+  });
+}
+
+function setDot(id, on) {
+  document.getElementById(id).className = 'dot ' + (on ? 'on' : 'off');
+}
+
+// Poll status every 500ms
+setInterval(updateStatus, 500);
+updateStatus();
+addLog('Dashboard connected');
+</script>
+</body>
+</html>

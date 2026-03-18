@@ -1,0 +1,6 @@
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+flask>=3.0.0
+spidev>=3.6
+# RPi.GPIO - preinstalled on Raspberry Pi OS
+# picamera2 - preinstalled on Raspberry Pi OS (bookworm+)
