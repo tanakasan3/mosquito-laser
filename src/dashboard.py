@@ -22,6 +22,7 @@ camera = None
 laser_ctrl = None
 ir_ctrl = None
 aimer = None
+recorder = None
 
 # Frame buffers for streaming (set by main loop)
 _frames = {
@@ -109,6 +110,7 @@ def api_status():
             "y": int(target.y),
         } if target else None,
         "tracks": tracks_data,
+        "recorder": recorder.get_state() if recorder else {},
     })
 
 
@@ -138,6 +140,20 @@ def api_detector_reset():
     if detector:
         detector.reset()
     return jsonify({"ok": True})
+
+
+@app.route("/api/recorder/toggle", methods=["POST"])
+def api_recorder_toggle():
+    if recorder:
+        recorder.toggle()
+    return jsonify({"ok": True, "state": recorder.get_state() if recorder else {}})
+
+
+@app.route("/api/recorder/recordings")
+def api_recorder_list():
+    if recorder:
+        return jsonify({"recordings": recorder.list_recordings()})
+    return jsonify({"recordings": []})
 
 
 @app.route("/api/tune", methods=["POST"])

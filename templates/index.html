@@ -223,6 +223,7 @@
       <div class="panel-body controls">
         <button class="btn" id="btn-laser" onclick="apiPost('/api/laser/toggle')">LASER: --</button>
         <button class="btn" id="btn-ir" onclick="apiPost('/api/ir/toggle')">IR LEDS: --</button>
+        <button class="btn" id="btn-record" onclick="apiPost('/api/recorder/toggle')">REC: --</button>
         <button class="btn" id="btn-aim" onclick="apiPost('/api/aim/center')">CENTER AIM</button>
         <button class="btn danger" id="btn-reset" onclick="apiPost('/api/detector/reset')">RESET DETECTOR</button>
       </div>
@@ -332,6 +333,18 @@ function updateStatus() {
       'LASER: ' + (d.laser.enabled ? (d.laser.on ? '🔴 ON' : 'OFF') : 'DISABLED');
     document.getElementById('btn-ir').textContent =
       'IR LEDS: ' + (d.ir.on ? '🟢 ON' : 'OFF');
+
+    // Recorder
+    if (d.recorder) {
+      const recBtn = document.getElementById('btn-record');
+      if (d.recorder.recording) {
+        recBtn.textContent = '⏺ REC: ' + d.recorder.elapsed + 's (' + d.recorder.frames + 'f)';
+        recBtn.classList.add('danger');
+      } else {
+        recBtn.textContent = 'REC: OFF';
+        recBtn.classList.remove('danger');
+      }
+    }
 
     // Aimer
     document.getElementById('s-aim-mode').textContent = d.aim_mode;

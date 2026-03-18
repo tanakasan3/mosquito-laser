@@ -34,6 +34,7 @@ import config
 from camera import Camera
 from detector import MosquitoDetector
 from laser import LaserController, IRController
+from recorder import SessionRecorder
 import dashboard
 
 
@@ -48,6 +49,9 @@ def parse_args():
     p.add_argument("--no-laser", action="store_true", help="Disable laser output")
     p.add_argument("--no-ir", action="store_true", help="Disable IR LEDs")
     p.add_argument("--headless", action="store_true", help="No local OpenCV window")
+    p.add_argument("--record", action="store_true", help="Start recording on launch")
+    p.add_argument("--record-raw", action="store_true", help="Also record raw camera feed")
+    p.add_argument("--record-dir", default=None, help="Directory for recordings")
     return p.parse_args()
 
 
@@ -78,6 +82,7 @@ def main():
     det = MosquitoDetector()
     laser = LaserController()
     ir = IRController()
+    rec = SessionRecorder(output_dir=args.record_dir, record_raw=args.record_raw)
     aimer = None
 
     if config.AIM_MODE == "servo":
@@ -102,6 +107,7 @@ def main():
     dashboard.laser_ctrl = laser
     dashboard.ir_ctrl = ir
     dashboard.aimer = aimer
+    dashboard.recorder = rec
 
     # Start web server in background thread
     web_thread = threading.Thread(target=dashboard.run_dashboard, daemon=True)
@@ -116,6 +122,10 @@ def main():
         running = False
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
+
+    # ── Start recording if requested ────────────────────
+    if args.record:
+        rec.start()
 
     # ── Main detection loop ─────────────────────────────
     print("[main] starting detection loop...")
@@ -139,6 +149,9 @@ def main():
                 raw=frame,
                 mask=fg_mask,
             )
+
+            # Record if active
+            rec.write_frame(annotated, frame)
 
             # Get primary target
             target = det.get_primary_target()
@@ -185,6 +198,7 @@ def main():
 
     finally:
         print("[main] cleaning up...")
+        rec.stop()
         cam.stop()
         laser.stop()
         ir.stop()
